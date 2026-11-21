@@ -79,6 +79,11 @@ public class MainActivity extends Activity {
         if (ans != null) CallNotifier.stop(this, ans);
         Uri d = i.getData();
         String url = d != null && "ai.shemetaapp.com".equals(d.getHost()) ? d.toString() : BuildConfig.SITE + "/chat";
+        // Google sign-in finished in the phone's browser: it hands back a one-time code (elbas://login?code=…)
+        if (d != null && "elbas".equals(d.getScheme()) && "login".equals(d.getHost())) {
+            String code = d.getQueryParameter("code");
+            if (code != null && code.matches("[0-9a-f]{32}")) url = BuildConfig.SITE + "/auth/app?code=" + code;
+        }
         web.loadUrl(url);
     }
 
