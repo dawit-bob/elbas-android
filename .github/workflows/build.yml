@@ -1,0 +1,32 @@
+name: Build ELBAS APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build release (unsigned; signed later with the owner's key)
+        run: gradle --no-daemon assembleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: elbas-ai-apk
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
+      - name: Publish build as a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/release/app-release-unsigned.apk elbas-ai-unsigned.apk
+          gh release create "build-${{ github.run_number }}" elbas-ai-unsigned.apk --title "Build ${{ github.run_number }}" --notes "Unsigned CI build. Signed separately with the owner's release key." --prerelease
