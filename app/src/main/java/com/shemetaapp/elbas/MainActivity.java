@@ -35,9 +35,10 @@ public class MainActivity extends Activity {
         setContentView(web);
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true); s.setDomStorageEnabled(true); s.setMediaPlaybackRequiresUserGesture(false);
-        s.setUserAgentString(s.getUserAgentString() + " ElbasApp/1.0");
+        s.setUserAgentString(s.getUserAgentString() + " ElbasApp/" + BuildConfig.VERSION_NAME);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, false);
+        restoreSignIn();
         web.addJavascriptInterface(new Bridge(), "ElbasApp");
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
@@ -46,6 +47,7 @@ public class MainActivity extends Activity {
                 try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (ActivityNotFoundException ignored) { }
                 return true;   // other sites (telebirr, Telegram, job sites…) open outside the app
             }
+            @Override public void onPageFinished(WebView v, String url) { keepSignIn(url); }
         });
         web.setWebChromeClient(new WebChromeClient() {
             @Override public void onPermissionRequest(PermissionRequest req) {
@@ -98,6 +100,37 @@ public class MainActivity extends Activity {
     @Override public void onBackPressed() { if (web.canGoBack()) web.goBack(); else super.onBackPressed(); }
 
     @Override protected void onResume() { super.onResume(); Push.start(this); }
+    @Override protected void onPause() { super.onPause(); CookieManager.getInstance().flush(); }
+    @Override protected void onStop() { super.onStop(); CookieManager.getInstance().flush(); }
+
+    // ---- Stay signed in: write cookies to disk right away (Android only saves them every ~30 s, so a
+    // quickly closed app lost the sign-in) and keep a private copy of the site's "stay signed in" cookie.
+    private static final String KEEP = "elbas_keep";
+    private boolean restoredOnce = false;
+
+    private void restoreSignIn() {
+        CookieManager cm = CookieManager.getInstance();
+        String now = cm.getCookie(BuildConfig.SITE);
+        String saved = getSharedPreferences("elbas", MODE_PRIVATE).getString(KEEP, "");
+        if ((now == null || !now.contains(KEEP + "=")) && saved.matches("[0-9a-f]{24}:[0-9a-f]{64}")) {
+            cm.setCookie(BuildConfig.SITE, KEEP + "=" + saved + "; Max-Age=34560000; Path=/; Secure; HttpOnly; SameSite=Lax");
+            cm.flush();
+            restoredOnce = true;
+        }
+    }
+
+    private void keepSignIn(String url) {
+        if (url == null || !url.startsWith(BuildConfig.SITE)) return;
+        CookieManager cm = CookieManager.getInstance();
+        cm.flush();
+        String all = cm.getCookie(BuildConfig.SITE);
+        String val = null;
+        if (all != null) for (String part : all.split(";")) { String t = part.trim(); if (t.startsWith(KEEP + "=")) val = t.substring(KEEP.length() + 1); }
+        android.content.SharedPreferences.Editor e = getSharedPreferences("elbas", MODE_PRIVATE).edit();
+        if (val != null && val.matches("[0-9a-f]{24}:[0-9a-f]{64}")) e.putString(KEEP, val).apply();
+        else if (val == null) e.remove(KEEP).apply();   // signed out (or the server refused the old cookie)
+        restoredOnce = false;
+    }
 
     /** window.ElbasApp in the web page. */
     final class Bridge {
