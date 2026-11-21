@@ -20,6 +20,17 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.os.CancellationSignal;
+import androidx.credentials.Credential;
+import androidx.credentials.CredentialManager;
+import androidx.credentials.CredentialManagerCallback;
+import androidx.credentials.CustomCredential;
+import androidx.credentials.GetCredentialRequest;
+import androidx.credentials.GetCredentialResponse;
+import androidx.credentials.exceptions.GetCredentialException;
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
+import org.json.JSONObject;
 
 /** ELBAS AI in an app: the website in a WebView, plus phone permissions (microphone, notifications, full-screen calls). */
 public class MainActivity extends Activity {
@@ -137,8 +148,34 @@ public class MainActivity extends Activity {
         restoredOnce = false;
     }
 
+    // ---- Google sign-in inside the app (Google's own account sheet) — never opens a browser.
+    private void startGoogle(String clientId) {
+        if (clientId == null || !clientId.matches("[0-9]+-[A-Za-z0-9_]+\\.apps\\.googleusercontent\\.com")) { googleDone(null, "config"); return; }
+        try {
+            GetSignInWithGoogleOption opt = new GetSignInWithGoogleOption.Builder(clientId).build();
+            GetCredentialRequest req = new GetCredentialRequest.Builder().addCredentialOption(opt).build();
+            CredentialManager.create(this).getCredentialAsync(this, req, new CancellationSignal(), this::runOnUiThread,
+                new CredentialManagerCallback<GetCredentialResponse, GetCredentialException>() {
+                    @Override public void onResult(GetCredentialResponse r) {
+                        Credential c = r.getCredential();
+                        if (c instanceof CustomCredential && GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL.equals(c.getType())) {
+                            try { googleDone(GoogleIdTokenCredential.createFrom(((CustomCredential) c).getData()).getIdToken(), null); }
+                            catch (Exception e) { googleDone(null, "parse"); }
+                        } else googleDone(null, "type");
+                    }
+                    @Override public void onError(GetCredentialException e) { googleDone(null, e.getClass().getSimpleName()); }
+                });
+        } catch (Throwable t) { googleDone(null, "unavailable"); }
+    }
+
+    private void googleDone(String token, String err) {
+        String js = "window.elbasGoogle&&window.elbasGoogle(" + (token == null ? "null" : JSONObject.quote(token)) + "," + (err == null ? "null" : JSONObject.quote(err)) + ")";
+        runOnUiThread(() -> web.evaluateJavascript(js, null));
+    }
+
     /** window.ElbasApp in the web page. */
     final class Bridge {
+        @JavascriptInterface public void googleSignIn(String clientId) { runOnUiThread(() -> startGoogle(clientId)); }
         @JavascriptInterface public String token() { return Push.token(MainActivity.this); }
         @JavascriptInterface public String version() { return BuildConfig.VERSION_NAME; }
         /** Android 14+: can this app show the full-screen call screen? */
