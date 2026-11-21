@@ -1,0 +1,29 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.shemetaapp.elbas'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'com.shemetaapp.elbas'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+        buildConfigField 'String', 'SITE', '"https://ai.shemetaapp.com"'
+    }
+    buildFeatures { buildConfig true }
+    signingConfigs {
+        release {
+            storeFile file(System.getenv('ELBAS_KEYSTORE') ?: 'elbas-release.jks')
+            storePassword System.getenv('ELBAS_KS_PASS') ?: ''
+            keyAlias 'elbas'
+            keyPassword System.getenv('ELBAS_KS_PASS') ?: ''
+        }
+    }
+    buildTypes {
+        release { minifyEnabled false; if (System.getenv('ELBAS_KS_PASS')) { signingConfig signingConfigs.release } }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+dependencies {
+    implementation 'com.google.firebase:firebase-messaging:24.0.0'
+}

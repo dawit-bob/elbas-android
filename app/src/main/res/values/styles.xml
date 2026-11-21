@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Elbas" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">#1E8A47</item>
+        <item name="android:colorPrimaryDark">#156a36</item>
+        <item name="android:colorAccent">#B98A00</item>
+        <item name="android:statusBarColor">#1E8A47</item>
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+    <style name="Theme.Elbas.Call" parent="android:Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">#0E2416</item>
+        <item name="android:statusBarColor">#0E2416</item>
+    </style>
+</resources>
