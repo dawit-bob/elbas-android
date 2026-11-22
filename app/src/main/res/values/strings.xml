@@ -6,4 +6,6 @@
     <string name="bg_allow">Allow · ፍቀድ</string>
     <string name="bg_later">Later · በኋላ</string>
     <string name="bg_done">All set · ተዘጋጅቷል</string>
+    <string name="upd_allow">Allow ELBAS to install the update, then come back · ዝማኔውን ለመጫን ELBAS ይፍቀዱ፣ ከዚያ ይመለሱ</string>
+    <string name="upd_downloading">Downloading the update… Android will ask you to install it · ዝማኔው እየወረደ ነው…</string>
 </resources>
