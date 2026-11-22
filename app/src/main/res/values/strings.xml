@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="back_again">Press back again to close ELBAS · ለመዝጋት እንደገና ይጫኑ</string>
+    <string name="bg_title">Messages and calls when ELBAS is closed · ELBAS ሲዘጋም መልዕክትና ጥሪ</string>
+    <string name="bg_text">So your phone shows new messages with a sound and rings for calls even when ELBAS is closed, allow ELBAS: notifications, no battery limit, and full-screen calls. It takes a few taps.\n\nELBAS ሲዘጋም አዲስ መልዕክት በድምፅ እንዲያሳይ እና ጥሪ እንዲያስጠራ፣ ለELBAS ማሳወቂያዎችን፣ የባትሪ ገደብ ማንሳትን እና ሙሉ ስክሪን ጥሪን ይፍቀዱ።</string>
+    <string name="bg_allow">Allow · ፍቀድ</string>
+    <string name="bg_later">Later · በኋላ</string>
+    <string name="bg_done">All set · ተዘጋጅቷል</string>
 </resources>
