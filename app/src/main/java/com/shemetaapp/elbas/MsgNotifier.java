@@ -30,7 +30,7 @@ public final class MsgNotifier {
         if (title == null || title.isEmpty()) title = "ELBAS";
         if (text == null) text = "";
         boolean grp = "1".equals(group);
-        String line = (grp && from != null && !from.isEmpty() ? from + ": " : "") + text;
+        String line = text;   // ELBAS already puts the sender's name in front for groups
         List<String> lines;
         synchronized (LINES) {
             lines = LINES.get(thread); if (lines == null) { lines = new ArrayList<>(); LINES.put(thread, lines); }

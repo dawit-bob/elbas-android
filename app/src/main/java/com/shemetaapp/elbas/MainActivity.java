@@ -96,6 +96,7 @@ public class MainActivity extends Activity {
     }
 
     private void open(Intent i) {
+        if (i.getBooleanExtra("update", false)) { i.removeExtra("update"); web.postDelayed(() -> checkUpdate(true), 800); }
         String ans = i.getStringExtra("answer");
         if (ans != null) CallNotifier.stop(this, ans);
         Uri d = i.getData();
@@ -152,11 +153,17 @@ public class MainActivity extends Activity {
         return BuildConfig.SITE + "/chat";
     }
 
-    // ---- New app version: ask once per version per day, then open the download in the phone's browser.
-    private void checkUpdate() {
+    // ---- New app version: checked every time the app comes to the front (network at most every 10 min);
+    // while this app is older than the one on ELBAS, it asks again each time it is opened (at most every 30 min).
+    // "Update now" downloads the new APK inside the app and opens Android's installer.
+    private volatile boolean updDialogOpen = false;
+
+    private void checkUpdate(boolean force) {
         android.content.SharedPreferences p = getSharedPreferences("elbas", MODE_PRIVATE);
-        if (System.currentTimeMillis() - p.getLong("upd_checked", 0) < 6 * 3600 * 1000L) return;
-        p.edit().putLong("upd_checked", System.currentTimeMillis()).apply();
+        long now = System.currentTimeMillis();
+        String cachedLatest = p.getString("upd_latest", ""), cachedApk = p.getString("upd_apk", "");
+        if (!force && now - p.getLong("upd_checked", 0) < 10 * 60 * 1000L) { askUpdate(cachedLatest, cachedApk, p.getString("upd_title", ""), p.getString("upd_text", ""), p.getString("upd_yes", ""), p.getString("upd_later", ""), false); return; }
+        p.edit().putLong("upd_checked", now).apply();
         new Thread(() -> {
             try {
                 java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(BuildConfig.SITE + "/api/app/config").openConnection();
@@ -168,20 +175,30 @@ public class MainActivity extends Activity {
                 while ((n = in.read(buf)) > 0 && bo.size() < 65536) bo.write(buf, 0, n);
                 JSONObject j = new JSONObject(bo.toString("UTF-8"));
                 String latest = j.optString("latest", ""), apk = j.optString("apk", "");
-                if (!newer(latest, BuildConfig.VERSION_NAME) || !apk.startsWith(BuildConfig.SITE + "/")) return;
-                String key = "upd_" + latest + "_" + (System.currentTimeMillis() / 86400000L);
-                if (p.getBoolean(key, false)) return;
-                p.edit().putBoolean(key, true).apply();
                 String title = j.optString("updateTitle", "Update available"), text = j.optString("updateText", "A new version of ELBAS AI is ready."),
                     yes = j.optString("updateBtn", "Update now"), later = j.optString("laterBtn", "Later");
-                runOnUiThread(() -> {
-                    if (isFinishing()) return;
-                    new AlertDialog.Builder(this).setTitle(title).setMessage(text).setCancelable(true)
-                        .setPositiveButton(yes, (dlg, w) -> { try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(apk))); } catch (Exception ignored) { } })
-                        .setNegativeButton(later, null).show();
-                });
+                p.edit().putString("upd_latest", latest).putString("upd_apk", apk).putString("upd_title", title).putString("upd_text", text)
+                    .putString("upd_yes", yes).putString("upd_later", later).apply();
+                askUpdate(latest, apk, title, text, yes, later, force);
             } catch (Exception ignored) { }
         }).start();
+    }
+
+    private void askUpdate(String latest, String apk, String title, String text, String yes, String later, boolean force) {
+        if (!newer(latest, BuildConfig.VERSION_NAME) || !apk.startsWith(BuildConfig.SITE + "/")) return;
+        android.content.SharedPreferences p = getSharedPreferences("elbas", MODE_PRIVATE);
+        long now = System.currentTimeMillis();
+        if (!force && now - p.getLong("upd_asked", 0) < 30 * 60 * 1000L) return;
+        runOnUiThread(() -> {
+            if (isFinishing() || !visible || updDialogOpen) return;
+            p.edit().putLong("upd_asked", System.currentTimeMillis()).apply();
+            updDialogOpen = true;
+            new AlertDialog.Builder(this).setTitle(title.isEmpty() ? "Update available" : title)
+                .setMessage(text.isEmpty() ? "A new version of ELBAS AI is ready." : text).setCancelable(true)
+                .setPositiveButton(yes.isEmpty() ? "Update now" : yes, (dlg, w) -> Updater.start(this, apk, latest))
+                .setNegativeButton(later.isEmpty() ? "Later" : later, null)
+                .setOnDismissListener(d -> updDialogOpen = false).show();
+        });
     }
 
     /** "1.10" is newer than "1.9". */
@@ -196,12 +213,19 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onResume() {
-        super.onResume(); visible = true; current = new java.lang.ref.WeakReference<>(this); Push.start(this); checkUpdate();
+        super.onResume(); visible = true; current = new java.lang.ref.WeakReference<>(this); Push.start(this); checkUpdate(false); Updater.resume(this);
         clearChat(currentUrl);
         if (bgFixing) { bgFixing = false; web.postDelayed(() -> checkBackground(true), 600); }   // back from a settings screen: next step
         else web.postDelayed(() -> checkBackground(false), 6000);
     }
     @Override protected void onPause() { super.onPause(); visible = false; CookieManager.getInstance().flush(); }
+
+    /** A new version was announced while the app is on screen: ask now. */
+    static void updateNow() {
+        MainActivity a = current.get();
+        if (a == null) return;
+        a.runOnUiThread(() -> a.checkUpdate(true));
+    }
 
     /** A message arrived while the app is on screen: let the page show its banner and play its tone now. */
     static void alertsCheck() {
@@ -320,6 +344,8 @@ public class MainActivity extends Activity {
         @JavascriptInterface public String version() { return BuildConfig.VERSION_NAME; }
         /** 1.4+: the app shows its own update popup, so the web page does not need to. */
         @JavascriptInterface public boolean hasUpdater() { return true; }
+        /** 1.6+: the app asks for every new version each time it is opened, so the page does not need to. */
+        @JavascriptInterface public boolean autoUpdate() { return true; }
         /** 1.5+: are notifications, battery and full-screen calls all set for ELBAS to alert while closed? */
         @JavascriptInterface public boolean backgroundOk() { return MainActivity.this.backgroundOk(); }
         /** 1.5+: open the next phone setting that is still missing. */

@@ -11,6 +11,7 @@ import android.os.Build;
 public class ElbasApp extends Application {
     public static final String CH_CALLS = "elbas_calls_v1";
     public static final String CH_MSGS = "elbas_msgs_v2";
+    public static final String CH_UPDATES = "elbas_updates_v1";
 
     @Override public void onCreate() {
         super.onCreate();
@@ -32,6 +33,9 @@ public class ElbasApp extends Application {
             m.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
                 new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_INSTANT).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build());
             getSystemService(NotificationManager.class).createNotificationChannel(m);
+            NotificationChannel u = new NotificationChannel(CH_UPDATES, "App updates", NotificationManager.IMPORTANCE_DEFAULT);
+            u.setDescription("A new version of ELBAS AI is ready");
+            getSystemService(NotificationManager.class).createNotificationChannel(u);
             try { getSystemService(NotificationManager.class).deleteNotificationChannel("elbas_msgs_v1"); } catch (Exception ignored) { }   // 1.4's silent channel
         }
         Push.start(this);
