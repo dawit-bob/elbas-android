@@ -3,6 +3,8 @@ package com.shemetaapp.elbas;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.widget.Toast;
 import android.app.NotificationManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
@@ -38,6 +40,9 @@ public class MainActivity extends Activity {
     private WebView web;
     private PermissionRequest pendingMic;
     private ValueCallback<Uri[]> fileCb;
+    static volatile boolean visible = false;
+    static volatile String currentUrl = null;
+    private long backAt = 0;
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     @Override protected void onCreate(Bundle b) {
@@ -58,7 +63,8 @@ public class MainActivity extends Activity {
                 try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (ActivityNotFoundException ignored) { }
                 return true;   // other sites (telebirr, Telegram, job sites…) open outside the app
             }
-            @Override public void onPageFinished(WebView v, String url) { keepSignIn(url); }
+            @Override public void onPageFinished(WebView v, String url) { keepSignIn(url); currentUrl = url; rememberPage(url); }
+            @Override public void doUpdateVisitedHistory(WebView v, String url, boolean reload) { currentUrl = url; }
         });
         web.setWebChromeClient(new WebChromeClient() {
             @Override public void onPermissionRequest(PermissionRequest req) {
@@ -74,6 +80,8 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
+        // Downloads (the app update APK, invoices…) go to the phone's browser, which saves them.
+        web.setDownloadListener((url, ua, cd, mime, len) -> { try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); } catch (Exception ignored) { } });
         askPermissions();
         open(getIntent());
     }
@@ -89,7 +97,7 @@ public class MainActivity extends Activity {
         String ans = i.getStringExtra("answer");
         if (ans != null) CallNotifier.stop(this, ans);
         Uri d = i.getData();
-        String url = d != null && "ai.shemetaapp.com".equals(d.getHost()) ? d.toString() : BuildConfig.SITE + "/chat";
+        String url = d != null && "ai.shemetaapp.com".equals(d.getHost()) ? d.toString() : lastPage();
         // Google sign-in finished in the phone's browser: it hands back a one-time code (elbas://login?code=…)
         if (d != null && "elbas".equals(d.getScheme()) && "login".equals(d.getHost())) {
             String code = d.getQueryParameter("code");
@@ -113,10 +121,80 @@ public class MainActivity extends Activity {
         else super.onActivityResult(code, result, data);
     }
 
-    @Override public void onBackPressed() { if (web.canGoBack()) web.goBack(); else super.onBackPressed(); }
+    /**
+     * Back: the page decides first (close a sheet or menu, or go UP: item → its service → Chat home).
+     * On the main page, Back twice closes the app instead of walking through old pages.
+     */
+    @Override public void onBackPressed() {
+        web.evaluateJavascript("(function(){try{return window.elbasBack?window.elbasBack():'none'}catch(e){return 'none'}})()", r -> {
+            if ("\"handled\"".equals(r)) return;
+            if ("\"none\"".equals(r) && web.canGoBack()) { web.goBack(); return; }
+            long now = System.currentTimeMillis();
+            if (now - backAt < 2000) { finish(); return; }
+            backAt = now;
+            Toast.makeText(this, getString(R.string.back_again), Toast.LENGTH_SHORT).show();
+        });
+    }
 
-    @Override protected void onResume() { super.onResume(); Push.start(this); }
-    @Override protected void onPause() { super.onPause(); CookieManager.getInstance().flush(); }
+    // ---- Come back to the same page: reopening the app within 30 minutes returns to where you were.
+    private void rememberPage(String url) {
+        if (url == null || !url.startsWith(BuildConfig.SITE + "/") || url.matches(".*/(login|register|logout|auth|verify|reset|forgot|offline|welcome)([/?#].*)?$")) return;
+        if (url.contains("go=1")) return;   // never re-open a call
+        getSharedPreferences("elbas", MODE_PRIVATE).edit().putString("last", url).putLong("last_at", System.currentTimeMillis()).apply();
+    }
+
+    private String lastPage() {
+        android.content.SharedPreferences p = getSharedPreferences("elbas", MODE_PRIVATE);
+        String u = p.getString("last", "");
+        if (u.startsWith(BuildConfig.SITE + "/") && System.currentTimeMillis() - p.getLong("last_at", 0) < 30 * 60 * 1000L) return u;
+        return BuildConfig.SITE + "/chat";
+    }
+
+    // ---- New app version: ask once per version per day, then open the download in the phone's browser.
+    private void checkUpdate() {
+        android.content.SharedPreferences p = getSharedPreferences("elbas", MODE_PRIVATE);
+        if (System.currentTimeMillis() - p.getLong("upd_checked", 0) < 6 * 3600 * 1000L) return;
+        p.edit().putLong("upd_checked", System.currentTimeMillis()).apply();
+        new Thread(() -> {
+            try {
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(BuildConfig.SITE + "/api/app/config").openConnection();
+                c.setConnectTimeout(8000); c.setReadTimeout(8000);
+                c.setRequestProperty("User-Agent", "ElbasApp/" + BuildConfig.VERSION_NAME);
+                String cookie = CookieManager.getInstance().getCookie(BuildConfig.SITE); if (cookie != null) c.setRequestProperty("Cookie", cookie);
+                if (c.getResponseCode() != 200) return;
+                java.io.InputStream in = c.getInputStream(); java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream(); byte[] buf = new byte[4096]; int n;
+                while ((n = in.read(buf)) > 0 && bo.size() < 65536) bo.write(buf, 0, n);
+                JSONObject j = new JSONObject(bo.toString("UTF-8"));
+                String latest = j.optString("latest", ""), apk = j.optString("apk", "");
+                if (!newer(latest, BuildConfig.VERSION_NAME) || !apk.startsWith(BuildConfig.SITE + "/")) return;
+                String key = "upd_" + latest + "_" + (System.currentTimeMillis() / 86400000L);
+                if (p.getBoolean(key, false)) return;
+                p.edit().putBoolean(key, true).apply();
+                String title = j.optString("updateTitle", "Update available"), text = j.optString("updateText", "A new version of ELBAS AI is ready."),
+                    yes = j.optString("updateBtn", "Update now"), later = j.optString("laterBtn", "Later");
+                runOnUiThread(() -> {
+                    if (isFinishing()) return;
+                    new AlertDialog.Builder(this).setTitle(title).setMessage(text).setCancelable(true)
+                        .setPositiveButton(yes, (dlg, w) -> { try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(apk))); } catch (Exception ignored) { } })
+                        .setNegativeButton(later, null).show();
+                });
+            } catch (Exception ignored) { }
+        }).start();
+    }
+
+    /** "1.10" is newer than "1.9". */
+    static boolean newer(String a, String b) {
+        if (a == null || !a.matches("\\d+(\\.\\d+){0,3}")) return false;
+        String[] x = a.split("\\."), y = b.split("\\.");
+        for (int i = 0; i < Math.max(x.length, y.length); i++) {
+            int p = i < x.length ? Integer.parseInt(x[i]) : 0, q = i < y.length ? Integer.parseInt(y[i].replaceAll("\\D.*", "").isEmpty() ? "0" : y[i].replaceAll("\\D.*", "")) : 0;
+            if (p != q) return p > q;
+        }
+        return false;
+    }
+
+    @Override protected void onResume() { super.onResume(); visible = true; Push.start(this); checkUpdate(); }
+    @Override protected void onPause() { super.onPause(); visible = false; CookieManager.getInstance().flush(); }
     @Override protected void onStop() { super.onStop(); CookieManager.getInstance().flush(); }
 
     // ---- Stay signed in: write cookies to disk right away (Android only saves them every ~30 s, so a
@@ -178,6 +256,8 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void googleSignIn(String clientId) { runOnUiThread(() -> startGoogle(clientId)); }
         @JavascriptInterface public String token() { return Push.token(MainActivity.this); }
         @JavascriptInterface public String version() { return BuildConfig.VERSION_NAME; }
+        /** 1.4+: the app shows its own update popup, so the web page does not need to. */
+        @JavascriptInterface public boolean hasUpdater() { return true; }
         /** Android 14+: can this app show the full-screen call screen? */
         @JavascriptInterface public boolean canFullScreen() {
             return Build.VERSION.SDK_INT < 34 || getSystemService(NotificationManager.class).canUseFullScreenIntent();
