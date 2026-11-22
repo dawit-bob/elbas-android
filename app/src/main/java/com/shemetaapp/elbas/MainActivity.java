@@ -43,6 +43,8 @@ public class MainActivity extends Activity {
     static volatile boolean visible = false;
     static volatile String currentUrl = null;
     private long backAt = 0;
+    private static java.lang.ref.WeakReference<MainActivity> current = new java.lang.ref.WeakReference<>(null);
+    private boolean bgAsked = false, bgFixing = false;
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     @Override protected void onCreate(Bundle b) {
@@ -63,8 +65,8 @@ public class MainActivity extends Activity {
                 try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (ActivityNotFoundException ignored) { }
                 return true;   // other sites (telebirr, Telegram, job sites…) open outside the app
             }
-            @Override public void onPageFinished(WebView v, String url) { keepSignIn(url); currentUrl = url; rememberPage(url); }
-            @Override public void doUpdateVisitedHistory(WebView v, String url, boolean reload) { currentUrl = url; }
+            @Override public void onPageFinished(WebView v, String url) { keepSignIn(url); currentUrl = url; rememberPage(url); clearChat(url); }
+            @Override public void doUpdateVisitedHistory(WebView v, String url, boolean reload) { currentUrl = url; clearChat(url); }
         });
         web.setWebChromeClient(new WebChromeClient() {
             @Override public void onPermissionRequest(PermissionRequest req) {
@@ -193,8 +195,68 @@ public class MainActivity extends Activity {
         return false;
     }
 
-    @Override protected void onResume() { super.onResume(); visible = true; Push.start(this); checkUpdate(); }
+    @Override protected void onResume() {
+        super.onResume(); visible = true; current = new java.lang.ref.WeakReference<>(this); Push.start(this); checkUpdate();
+        clearChat(currentUrl);
+        if (bgFixing) { bgFixing = false; web.postDelayed(() -> checkBackground(true), 600); }   // back from a settings screen: next step
+        else web.postDelayed(() -> checkBackground(false), 6000);
+    }
     @Override protected void onPause() { super.onPause(); visible = false; CookieManager.getInstance().flush(); }
+
+    /** A message arrived while the app is on screen: let the page show its banner and play its tone now. */
+    static void alertsCheck() {
+        MainActivity a = current.get();
+        if (a == null || a.web == null) return;
+        a.runOnUiThread(() -> { try { a.web.evaluateJavascript("window.elbasAlertsCheck&&window.elbasAlertsCheck()", null); } catch (Exception ignored) { } });
+    }
+
+    private void clearChat(String url) {
+        if (url == null) return;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("/messages\\?(?:.*&)?t=([a-f0-9]{24})").matcher(url);
+        if (m.find()) MsgNotifier.clear(this, m.group(1));
+    }
+
+    // ---- Messages and calls while ELBAS is closed need: notifications on, no battery limit, full-screen calls (Android 14+).
+    private boolean notifOk() { return getSystemService(NotificationManager.class).areNotificationsEnabled(); }
+    private boolean batteryOk() {
+        android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+        return pm == null || pm.isIgnoringBatteryOptimizations(getPackageName());
+    }
+    private boolean fullOk() { return Build.VERSION.SDK_INT < 34 || getSystemService(NotificationManager.class).canUseFullScreenIntent(); }
+    boolean backgroundOk() { return notifOk() && batteryOk() && fullOk(); }
+
+    private void checkBackground(boolean continuing) {
+        if (!visible || isFinishing() || backgroundOk()) return;
+        android.content.SharedPreferences p = getSharedPreferences("elbas", MODE_PRIVATE);
+        if (!continuing) {
+            if (bgAsked || System.currentTimeMillis() - p.getLong("bg_asked", 0) < 3 * 86400000L) return;   // ask at most every 3 days
+            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                && !p.getBoolean("notif_asked", false)) { p.edit().putBoolean("notif_asked", true).apply(); return; }   // the system question comes first
+            bgAsked = true; p.edit().putLong("bg_asked", System.currentTimeMillis()).apply();
+            new AlertDialog.Builder(this).setTitle(R.string.bg_title).setMessage(R.string.bg_text).setCancelable(true)
+                .setPositiveButton(R.string.bg_allow, (d, w) -> fixBackground()).setNegativeButton(R.string.bg_later, null).show();
+        } else fixBackground();
+    }
+
+    /** One step at a time: notifications → battery → full-screen calls. Each opens the right phone setting. */
+    void fixBackground() {
+        try {
+            if (!notifOk()) {
+                bgFixing = true;
+                startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName()));
+            } else if (!batteryOk()) {
+                bgFixing = true;
+                try { startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName()))); }
+                catch (Exception e) { startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)); }
+            } else if (!fullOk()) {
+                bgFixing = true;
+                startActivity(new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:" + getPackageName())));
+            } else Toast.makeText(this, getString(R.string.bg_done), Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            bgFixing = false;
+            try { startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()))); } catch (Exception ignored) { }
+        }
+    }
     @Override protected void onStop() { super.onStop(); CookieManager.getInstance().flush(); }
 
     // ---- Stay signed in: write cookies to disk right away (Android only saves them every ~30 s, so a
@@ -258,6 +320,12 @@ public class MainActivity extends Activity {
         @JavascriptInterface public String version() { return BuildConfig.VERSION_NAME; }
         /** 1.4+: the app shows its own update popup, so the web page does not need to. */
         @JavascriptInterface public boolean hasUpdater() { return true; }
+        /** 1.5+: are notifications, battery and full-screen calls all set for ELBAS to alert while closed? */
+        @JavascriptInterface public boolean backgroundOk() { return MainActivity.this.backgroundOk(); }
+        /** 1.5+: open the next phone setting that is still missing. */
+        @JavascriptInterface public void fixBackground() { runOnUiThread(MainActivity.this::fixBackground); }
+        /** 1.5+: the page shows message banners itself while the app is open. */
+        @JavascriptInterface public boolean hasMsgAlerts() { return true; }
         /** Android 14+: can this app show the full-screen call screen? */
         @JavascriptInterface public boolean canFullScreen() {
             return Build.VERSION.SDK_INT < 34 || getSystemService(NotificationManager.class).canUseFullScreenIntent();

@@ -61,6 +61,18 @@ public final class Push {
         if (t != null && !t.isEmpty()) prefs(c).edit().putString("fcm_token", t).apply();
     }
 
+    /** Tell ELBAS a chat message reached this phone (even when the app is closed): the sender sees ✓✓. */
+    static void delivered(Context c, String thread, String id) {
+        final String dev = token(c);
+        if (dev.isEmpty()) return;
+        new Thread(() -> {
+            try {
+                http("POST", BuildConfig.SITE + "/api/msg/native-delivered",
+                    "t=" + URLEncoder.encode(thread, "UTF-8") + "&id=" + URLEncoder.encode(id, "UTF-8") + "&device=" + URLEncoder.encode(dev, "UTF-8"));
+            } catch (Exception ignored) { }
+        }).start();
+    }
+
     /** Tell ELBAS this phone declined the call (the device token proves who it is). */
     static void decline(Context c, String callToken) {
         final String dev = token(c);
