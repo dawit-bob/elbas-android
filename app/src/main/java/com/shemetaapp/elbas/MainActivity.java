@@ -345,7 +345,7 @@ public class MainActivity extends Activity {
         /** 1.4+: the app shows its own update popup, so the web page does not need to. */
         @JavascriptInterface public boolean hasUpdater() { return true; }
         /** 1.6+: the app asks for every new version each time it is opened, so the page does not need to. */
-        @JavascriptInterface public boolean autoUpdate() { return true; }
+        @JavascriptInterface public boolean autoUpdate() { return true; } /* 1.7+: Share with a friend opens the Android share sheet. */ @JavascriptInterface public void share(String text) { final String t = text == null ? "" : text.length() > 600 ? text.substring(0, 600) : text; runOnUiThread(() -> { try { Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, t).putExtra(Intent.EXTRA_SUBJECT, "ELBAS AI"); startActivity(Intent.createChooser(send, "ELBAS AI")); } catch (Exception ignored) { } }); }
         /** 1.5+: are notifications, battery and full-screen calls all set for ELBAS to alert while closed? */
         @JavascriptInterface public boolean backgroundOk() { return MainActivity.this.backgroundOk(); }
         /** 1.5+: open the next phone setting that is still missing. */
