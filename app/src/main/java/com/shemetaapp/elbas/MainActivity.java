@@ -72,8 +72,7 @@ public class MainActivity extends Activity {
             @Override public void onPermissionRequest(PermissionRequest req) {
                 runOnUiThread(() -> {
                     if (!"ai.shemetaapp.com".equals(req.getOrigin().getHost())) { req.deny(); return; }
-                    if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) req.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
-                    else { pendingMic = req; requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_PERMS); }
+                    answerMedia(req, true);   // 1.9: microphone and camera (video meetings)
                 });
             }
             @Override public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
@@ -108,16 +107,16 @@ public class MainActivity extends Activity {
         }
         /* 1.8+: a message notification shown by Android itself (app was stopped) opens that chat. */ String th = i.getStringExtra("thread"); if (th != null && th.matches("[a-f0-9]{24}") && "msg".equals(i.getStringExtra("type"))) { url = BuildConfig.SITE + "/messages?t=" + th; i.removeExtra("thread"); }
         /* 1.8+: Share a telebirr SMS to ELBAS → the "top up with the telebirr SMS" page opens with the text already pasted. */ String shared = Intent.ACTION_SEND.equals(i.getAction()) && "text/plain".equals(i.getType()) ? i.getStringExtra(Intent.EXTRA_TEXT) : null; if (shared != null && !shared.trim().isEmpty()) { url = BuildConfig.SITE + "/wallet/sms"; i.setAction(Intent.ACTION_MAIN); final String st = shared.length() > 2000 ? shared.substring(0, 2000) : shared; web.postDelayed(new Runnable() { int n = 0; @Override public void run() { web.evaluateJavascript("(window.elbasSharedText && window.elbasSharedText(" + org.json.JSONObject.quote(st) + ")) ? 1 : 0", v -> { if (!"1".equals(v) && ++n < 30) web.postDelayed(this, 500); }); } }, 900); }
+        /* 1.9: reminders, meeting invitations and minutes open their own page. */ String go = i.getStringExtra("url"); if (go != null && go.matches("/(calendar|today|meet)[A-Za-z0-9/?=&#._%-]{0,120}") && "remind".equals(i.getStringExtra("type"))) { url = BuildConfig.SITE + go; i.removeExtra("url"); }
         web.loadUrl(url);
     }
 
     @Override protected void onNewIntent(Intent i) { super.onNewIntent(i); setIntent(i); open(i); }
 
+    /* 1.9: give the page the microphone and/or camera it asked for; ask Android first when needed (once). */ private void answerMedia(PermissionRequest req, boolean ask) { java.util.List<String> grant = new java.util.ArrayList<>(), need = new java.util.ArrayList<>(); for (String r : req.getResources()) { if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(r)) { if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) grant.add(r); else need.add(Manifest.permission.RECORD_AUDIO); } else if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(r)) { if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) grant.add(r); else need.add(Manifest.permission.CAMERA); } } if (ask && !need.isEmpty()) { pendingMic = req; requestPermissions(need.toArray(new String[0]), REQ_PERMS); return; } if (grant.isEmpty()) req.deny(); else req.grant(grant.toArray(new String[0])); }
     @Override public void onRequestPermissionsResult(int code, String[] perms, int[] res) {
         if (code == REQ_PERMS && pendingMic != null) {
-            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) pendingMic.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
-            else pendingMic.deny();
-            pendingMic = null;
+            PermissionRequest r = pendingMic; pendingMic = null; answerMedia(r, false);
         }
     }
 
