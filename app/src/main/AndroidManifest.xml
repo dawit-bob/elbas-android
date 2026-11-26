@@ -38,6 +38,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="elbas" android:host="login" />
             </intent-filter>
+            <intent-filter><action android:name="android.intent.action.SEND" /><category android:name="android.intent.category.DEFAULT" /><data android:mimeType="text/plain" /></intent-filter>
         </activity>
 
         <activity android:name=".IncomingCallActivity" android:exported="false" android:launchMode="singleInstance"
