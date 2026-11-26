@@ -106,6 +106,7 @@ public class MainActivity extends Activity {
             String code = d.getQueryParameter("code");
             if (code != null && code.matches("[0-9a-f]{32}")) url = BuildConfig.SITE + "/auth/app?code=" + code;
         }
+        /* 1.8+: a message notification shown by Android itself (app was stopped) opens that chat. */ String th = i.getStringExtra("thread"); if (th != null && th.matches("[a-f0-9]{24}") && "msg".equals(i.getStringExtra("type"))) { url = BuildConfig.SITE + "/messages?t=" + th; i.removeExtra("thread"); }
         /* 1.8+: Share a telebirr SMS to ELBAS → the "top up with the telebirr SMS" page opens with the text already pasted. */ String shared = Intent.ACTION_SEND.equals(i.getAction()) && "text/plain".equals(i.getType()) ? i.getStringExtra(Intent.EXTRA_TEXT) : null; if (shared != null && !shared.trim().isEmpty()) { url = BuildConfig.SITE + "/wallet/sms"; i.setAction(Intent.ACTION_MAIN); final String st = shared.length() > 2000 ? shared.substring(0, 2000) : shared; web.postDelayed(new Runnable() { int n = 0; @Override public void run() { web.evaluateJavascript("(window.elbasSharedText && window.elbasSharedText(" + org.json.JSONObject.quote(st) + ")) ? 1 : 0", v -> { if (!"1".equals(v) && ++n < 30) web.postDelayed(this, 500); }); } }, 900); }
         web.loadUrl(url);
     }
